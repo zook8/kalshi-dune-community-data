@@ -44,8 +44,7 @@ class DuneUploader:
 
         self.base_url = "https://api.dune.com/api/v1"
         self.headers = {
-            'X-DUNE-API-KEY': self.dune_api_key,
-            'Content-Type': 'application/json'
+            'X-DUNE-API-KEY': self.dune_api_key
         }
 
         self.data_dir = PROJECT_ROOT / "data"
@@ -60,10 +59,14 @@ class DuneUploader:
         try:
             url = f"{self.base_url}{endpoint}"
 
+            # Add Content-Type for JSON requests
+            headers = self.headers.copy()
+            headers['Content-Type'] = 'application/json'
+
             if method == 'POST':
-                response = requests.post(url, headers=self.headers, json=data)
+                response = requests.post(url, headers=headers, json=data)
             else:
-                response = requests.get(url, headers=self.headers)
+                response = requests.get(url, headers=headers)
 
             # Log response for debugging
             logger.info(f"Dune API {method} {endpoint}: Status {response.status_code}")
@@ -129,53 +132,78 @@ class DuneUploader:
             logger.error(f"Failed to clear data from {namespace}.{table_name}")
             return False
 
-    def clean_data_for_json(self, df):
-        """Clean DataFrame to ensure JSON compliance"""
-        logger.info("Cleaning data for JSON serialization...")
+    def clean_data_for_upload(self, df):
+        """Clean DataFrame for CSV upload to Dune"""
+        logger.info("Cleaning data for upload...")
 
         # Make a copy to avoid modifying original
         df_clean = df.copy()
 
-        # Replace inf, -inf, and NaN values with None (becomes null in JSON)
-        df_clean = df_clean.replace([float('inf'), float('-inf')], None)
-        df_clean = df_clean.where(pd.notnull(df_clean), None)
-
-        # Log any problematic columns found
+        # Handle numeric columns
         numeric_cols = df_clean.select_dtypes(include=[float, int]).columns
         for col in numeric_cols:
-            if df[col].isin([float('inf'), float('-inf')]).any():
-                count = df[col].isin([float('inf'), float('-inf')]).sum()
-                logger.warning(f"Cleaned {count} infinite values in column '{col}'")
-            if df[col].isna().any():
-                count = df[col].isna().sum()
-                logger.info(f"Found {count} NaN values in column '{col}' (converted to null)")
+            # Check for infinite values
+            inf_mask = df_clean[col].isin([float('inf'), float('-inf')])
+            if inf_mask.any():
+                count = inf_mask.sum()
+                logger.warning(f"Replacing {count} infinite values in column '{col}' with NaN")
+                df_clean.loc[inf_mask, col] = None
+
+            # Check for very large values that might cause issues
+            if df_clean[col].dtype in ['float64', 'int64']:
+                # Replace extremely large values that might overflow
+                large_mask = (df_clean[col].abs() > 1e15) & df_clean[col].notnull()
+                if large_mask.any():
+                    count = large_mask.sum()
+                    logger.warning(f"Replacing {count} extremely large values in column '{col}' with NaN")
+                    df_clean.loc[large_mask, col] = None
+
+        # Convert all NaN/None to empty string for CSV compatibility
+        df_clean = df_clean.fillna('')
+
+        # Log cleaned columns
+        for col in numeric_cols:
+            if (df[col].isna() | df[col].isin([float('inf'), float('-inf')])).any():
+                count = (df[col].isna() | df[col].isin([float('inf'), float('-inf')])).sum()
+                logger.info(f"Cleaned {count} problematic values in column '{col}'")
 
         return df_clean
 
     def insert_data_to_table_direct(self, table_name, df):
-        """Insert DataFrame directly to Dune table"""
+        """Insert DataFrame directly to Dune table using CSV format"""
         logger.info(f"Inserting {len(df)} rows into {table_name}")
 
         namespace = self.get_dune_username()
         endpoint = f'/table/{namespace}/{table_name}/insert'
 
-        # Clean data for JSON compliance
-        df_clean = self.clean_data_for_json(df)
+        # Clean data for upload
+        df_clean = self.clean_data_for_upload(df)
 
-        # Convert DataFrame to list of dicts for JSON serialization
-        data_rows = df_clean.to_dict('records')
+        # Convert DataFrame to CSV string
+        csv_buffer = df_clean.to_csv(index=False)
 
-        payload = {
-            "data": data_rows
+        # Prepare headers for CSV upload
+        headers = {
+            'X-DUNE-API-KEY': self.dune_api_key,
+            'Content-Type': 'text/csv'
         }
 
-        result = self.make_dune_request(endpoint, 'POST', payload)
+        try:
+            url = f"{self.base_url}{endpoint}"
+            response = requests.post(url, headers=headers, data=csv_buffer.encode('utf-8'))
 
-        if result:
-            logger.info(f"Successfully inserted {len(data_rows)} rows into {namespace}.{table_name}")
+            logger.info(f"Dune API POST {endpoint}: Status {response.status_code}")
+
+            if response.status_code >= 400:
+                logger.error(f"Response: {response.text}")
+
+            response.raise_for_status()
+
+            logger.info(f"Successfully inserted {len(df)} rows into {namespace}.{table_name}")
             return True
-        else:
-            logger.error(f"Failed to insert data into {namespace}.{table_name}")
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Dune API request failed for {endpoint}: {e}")
             return False
 
     def clear_todays_data_via_rebuild(self, table_name, df_today):
