@@ -129,6 +129,29 @@ class DuneUploader:
             logger.error(f"Failed to clear data from {namespace}.{table_name}")
             return False
 
+    def clean_data_for_json(self, df):
+        """Clean DataFrame to ensure JSON compliance"""
+        logger.info("Cleaning data for JSON serialization...")
+
+        # Make a copy to avoid modifying original
+        df_clean = df.copy()
+
+        # Replace inf, -inf, and NaN values with None (becomes null in JSON)
+        df_clean = df_clean.replace([float('inf'), float('-inf')], None)
+        df_clean = df_clean.where(pd.notnull(df_clean), None)
+
+        # Log any problematic columns found
+        numeric_cols = df_clean.select_dtypes(include=[float, int]).columns
+        for col in numeric_cols:
+            if df[col].isin([float('inf'), float('-inf')]).any():
+                count = df[col].isin([float('inf'), float('-inf')]).sum()
+                logger.warning(f"Cleaned {count} infinite values in column '{col}'")
+            if df[col].isna().any():
+                count = df[col].isna().sum()
+                logger.info(f"Found {count} NaN values in column '{col}' (converted to null)")
+
+        return df_clean
+
     def insert_data_to_table_direct(self, table_name, df):
         """Insert DataFrame directly to Dune table"""
         logger.info(f"Inserting {len(df)} rows into {table_name}")
@@ -136,8 +159,11 @@ class DuneUploader:
         namespace = self.get_dune_username()
         endpoint = f'/table/{namespace}/{table_name}/insert'
 
+        # Clean data for JSON compliance
+        df_clean = self.clean_data_for_json(df)
+
         # Convert DataFrame to list of dicts for JSON serialization
-        data_rows = df.to_dict('records')
+        data_rows = df_clean.to_dict('records')
 
         payload = {
             "data": data_rows
@@ -259,7 +285,7 @@ class DuneUploader:
             logger.info(f"Processing events data from {events_file}")
 
             try:
-                df_events = pd.read_csv(events_file)
+                df_events = pd.read_csv(events_file, low_memory=False)
                 logger.info(f"Loaded {len(df_events)} events records")
 
                 # Create events table if needed
@@ -287,7 +313,7 @@ class DuneUploader:
             logger.info(f"Processing markets data from {markets_file}")
 
             try:
-                df_markets = pd.read_csv(markets_file)
+                df_markets = pd.read_csv(markets_file, low_memory=False)
                 logger.info(f"Loaded {len(df_markets)} markets records")
 
                 # Create markets table if needed
