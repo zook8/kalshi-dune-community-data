@@ -325,8 +325,20 @@ class DuneUploader:
                 )
 
                 if table_created:
-                    # Map CSV columns to schema columns (handle case differences)
+                    # Map CSV columns to match Dune table schema exactly
                     df_events = df_events.rename(columns={'DATE': 'date'})
+
+                    # Reorder columns to match Dune table schema
+                    expected_events_columns = [
+                        'event_ticker', 'series_ticker', 'sub_title', 'title',
+                        'collateral_return_type', 'mutually_exclusive', 'category',
+                        'price_level_structure', 'available_on_brokers',
+                        'collection_date', 'date', 'strike_date', 'strike_period'
+                    ]
+
+                    # Keep only expected columns in correct order
+                    df_events = df_events[expected_events_columns]
+
                     # Clear table and insert fresh data (prevents duplicates)
                     results['events'] = self.clear_todays_data_via_rebuild(self.events_table, df_events)
 
@@ -353,8 +365,32 @@ class DuneUploader:
                 )
 
                 if table_created:
-                    # Map CSV columns to schema columns (handle case differences)
+                    # Map CSV columns to match Dune table schema exactly
                     df_markets = df_markets.rename(columns={'DATE': 'date'})
+
+                    # Reorder columns to match Dune table schema
+                    expected_markets_columns = [
+                        'ticker', 'event_ticker', 'market_type', 'title', 'subtitle',
+                        'yes_sub_title', 'no_sub_title', 'open_time', 'close_time',
+                        'expected_expiration_time', 'expiration_time', 'latest_expiration_time',
+                        'settlement_timer_seconds', 'status', 'response_price_units',
+                        'notional_value', 'notional_value_dollars', 'yes_bid', 'yes_bid_dollars',
+                        'yes_ask', 'yes_ask_dollars', 'no_bid', 'no_bid_dollars',
+                        'no_ask', 'no_ask_dollars', 'last_price', 'last_price_dollars',
+                        'previous_yes_bid', 'previous_yes_bid_dollars', 'previous_yes_ask',
+                        'previous_yes_ask_dollars', 'previous_price', 'previous_price_dollars',
+                        'volume', 'volume_24h', 'liquidity', 'liquidity_dollars',
+                        'open_interest', 'result', 'can_close_early', 'expiration_value',
+                        'category', 'risk_limit_cents', 'strike_type', 'custom_strike',
+                        'rules_primary', 'rules_secondary', 'tick_size', 'mve_collection_ticker',
+                        'mve_selected_legs', 'collection_date', 'date', 'floor_strike',
+                        'early_close_condition', 'cap_strike', 'primary_participant_key',
+                        'fee_waiver_expiration_time'
+                    ]
+
+                    # Keep only expected columns in correct order
+                    df_markets = df_markets[expected_markets_columns]
+
                     # Clear table and insert fresh data (prevents duplicates)
                     results['markets'] = self.clear_todays_data_via_rebuild(self.markets_table, df_markets)
 
