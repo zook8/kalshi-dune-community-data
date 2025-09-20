@@ -12,6 +12,9 @@ from datetime import datetime
 # Setup paths
 PROJECT_ROOT = Path(__file__).parent.parent
 
+# Ensure logs directory exists
+(PROJECT_ROOT / "logs").mkdir(exist_ok=True)
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
