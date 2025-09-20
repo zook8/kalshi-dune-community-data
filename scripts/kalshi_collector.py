@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Kalshi Data Collector - Daily collection of events and markets data
-Collects all active events and their associated markets, preserving original API schema
+Kalshi Data Collector - Public API Version (No Authentication Required)
+Collects all active events and markets using public endpoints only
 """
 
 import os
@@ -20,7 +20,7 @@ import time
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.append(str(PROJECT_ROOT))
 
-# Load environment variables
+# Load environment variables (only need DUNE_API_KEY now)
 load_dotenv(PROJECT_ROOT / "config" / ".env")
 
 # Setup logging
@@ -34,13 +34,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class KalshiCollector:
+class KalshiPublicCollector:
     def __init__(self):
-        self.api_key = os.getenv('KALSHI_API_KEY')
+        # No API key required! Using public endpoints
         self.base_url = "https://api.elections.kalshi.com/trade-api/v2"
         self.session = requests.Session()
-        if self.api_key:
-            self.session.headers.update({'Authorization': f'Bearer {self.api_key}'})
+        
+        # Set reasonable headers to be a good API citizen
+        self.session.headers.update({
+            'User-Agent': 'KalshiDunePublicCollector/1.0',
+            'Accept': 'application/json'
+        })
         
         # Create data directories
         self.data_dir = PROJECT_ROOT / "data"
@@ -49,15 +53,20 @@ class KalshiCollector:
         # Today's date for file naming
         self.date_str = datetime.now().strftime('%Y%m%d')
         
+        # Rate limiting - be extra conservative since we're unauthenticated
+        self.request_delay = 3.0  # 3 seconds between requests = 20 requests/minute
+        
     def make_request(self, endpoint, params=None):
-        """Make API request with error handling and rate limiting"""
+        """Make API request with error handling and conservative rate limiting"""
         try:
             url = f"{self.base_url}{endpoint}"
-            response = self.session.get(url, params=params)
-            response.raise_for_status()
             
-            # Basic rate limiting - be nice to the API
-            time.sleep(0.1)  # 100ms between requests
+            # Conservative rate limiting for public endpoints
+            logger.info(f"Making request to {endpoint} (waiting {self.request_delay}s for rate limit)")
+            time.sleep(self.request_delay)
+            
+            response = self.session.get(url, params=params, timeout=30)
+            response.raise_for_status()
             
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -65,7 +74,7 @@ class KalshiCollector:
             return None
     
     def get_all_paginated_data(self, endpoint, params=None):
-        """Fetch all data from paginated endpoint"""
+        """Fetch all data from paginated endpoint with conservative rate limiting"""
         all_data = []
         cursor = None
         page = 1
@@ -73,8 +82,8 @@ class KalshiCollector:
         if params is None:
             params = {}
         
-        # Set high limit to minimize API calls
-        params['limit'] = 1000
+        # Use moderate limit to balance efficiency with rate limits
+        params['limit'] = 200  # Conservative limit for public endpoints
         
         while True:
             if cursor:
@@ -90,97 +99,104 @@ class KalshiCollector:
             # Different endpoints return data in different keys
             if 'events' in response:
                 page_data = response['events']
+                cursor = response.get('cursor')
             elif 'markets' in response:
                 page_data = response['markets']
+                cursor = response.get('cursor')
+            elif 'trades' in response:
+                page_data = response['trades']
+                cursor = response.get('cursor')
             else:
                 logger.error(f"Unexpected response structure for {endpoint}")
+                break
+            
+            if not page_data:
+                logger.info(f"No data returned for {endpoint} page {page}")
                 break
             
             all_data.extend(page_data)
             logger.info(f"Page {page}: {len(page_data)} records, Total: {len(all_data)}")
             
             # Check for next page
-            cursor = response.get('cursor')
             if not cursor:
                 logger.info(f"Completed fetching {endpoint}: {len(all_data)} total records")
                 break
             
             page += 1
             
-            # Safety check - shouldn't need this many pages for daily data
-            if page > 50:
-                logger.warning(f"Stopped at page {page} - too many pages, possible infinite loop")
+            # Safety check to avoid infinite loops
+            if page > 20:
+                logger.warning(f"Stopped at page {page} - reached safety limit")
                 break
         
         return all_data
     
     def collect_events_data(self):
-        """Collect all events data"""
-        logger.info("Starting events data collection...")
+        """Collect all events data using public API"""
+        logger.info("Starting events data collection (public API)...")
         
-        # Get all events (we want both open and recent closed events)
-        all_events = []
-        
-        # Get open events
-        open_events = self.get_all_paginated_data('/events', {'status': 'open'})
-        if open_events:
-            all_events.extend(open_events)
-        
-        # Get recently closed events (last 7 days)
-        from datetime import timedelta
-        week_ago = int((datetime.now() - timedelta(days=7)).timestamp())
-        recent_events = self.get_all_paginated_data('/events', {
-            'status': 'closed',
-            'min_close_ts': week_ago
+        # Get open events - this is our primary interest
+        logger.info("Fetching open events...")
+        open_events = self.get_all_paginated_data('/events', {
+            'status': 'open',
+            'with_nested_markets': True  # Get market data embedded in events
         })
-        if recent_events:
-            all_events.extend(recent_events)
         
-        # Remove duplicates by event_ticker
-        unique_events = {event['event_ticker']: event for event in all_events}.values()
-        events_list = list(unique_events)
-        
-        logger.info(f"Collected {len(events_list)} unique events")
+        if not open_events:
+            logger.error("No open events found")
+            return []
         
         # Add collection metadata
-        for event in events_list:
+        for event in open_events:
             event['collection_date'] = datetime.now(timezone.utc).isoformat()
             event['collection_timestamp'] = int(datetime.now().timestamp())
         
-        return events_list
+        logger.info(f"Collected {len(open_events)} open events")
+        return open_events
     
-    def collect_markets_data(self, events):
-        """Collect markets data for all events"""
-        logger.info("Starting markets data collection...")
+    def collect_markets_data(self):
+        """Collect markets data using public API (alternative method)"""
+        logger.info("Starting markets data collection (public API)...")
         
-        all_markets = []
+        # Get all open markets directly
+        logger.info("Fetching open markets...")
+        open_markets = self.get_all_paginated_data('/markets', {
+            'status': 'open'
+        })
         
-        # Collect markets for open events
-        open_events = [e for e in events if e.get('status') == 'open']
-        logger.info(f"Collecting markets for {len(open_events)} open events")
+        if not open_markets:
+            logger.error("No open markets found")
+            return []
         
-        for event in open_events:
-            event_ticker = event['event_ticker']
-            logger.info(f"Fetching markets for event: {event_ticker}")
-            
-            markets = self.get_all_paginated_data('/markets', {
-                'event_ticker': event_ticker,
-                'status': 'open'  # Only collect open markets as requested
-            })
-            
-            if markets:
-                # Add event context to each market
-                for market in markets:
-                    market['collection_date'] = datetime.now(timezone.utc).isoformat()
-                    market['collection_timestamp'] = int(datetime.now().timestamp())
-                
-                all_markets.extend(markets)
-                logger.info(f"  → {len(markets)} markets collected")
-            else:
-                logger.warning(f"  → No markets found for {event_ticker}")
+        # Add collection metadata
+        for market in open_markets:
+            market['collection_date'] = datetime.now(timezone.utc).isoformat()
+            market['collection_timestamp'] = int(datetime.now().timestamp())
         
-        logger.info(f"Collected {len(all_markets)} total markets")
-        return all_markets
+        logger.info(f"Collected {len(open_markets)} open markets")
+        return open_markets
+    
+    def collect_trade_data_sample(self):
+        """Collect recent trade data for market activity insights"""
+        logger.info("Starting recent trade data collection...")
+        
+        # Get recent trades (last hour)
+        from datetime import timedelta
+        hour_ago = int((datetime.now() - timedelta(hours=1)).timestamp())
+        
+        recent_trades = self.get_all_paginated_data('/markets/trades', {
+            'min_ts': hour_ago,
+            'limit': 100  # Just a sample for activity metrics
+        })
+        
+        if recent_trades:
+            # Add collection metadata
+            for trade in recent_trades:
+                trade['collection_date'] = datetime.now(timezone.utc).isoformat()
+                trade['collection_timestamp'] = int(datetime.now().timestamp())
+        
+        logger.info(f"Collected {len(recent_trades) if recent_trades else 0} recent trades")
+        return recent_trades or []
     
     def save_to_csv(self, data, filename):
         """Save data to CSV file"""
@@ -200,44 +216,62 @@ class KalshiCollector:
             return None
     
     def run_daily_collection(self):
-        """Execute daily data collection"""
+        """Execute daily data collection using public APIs only"""
         logger.info("=" * 50)
-        logger.info("STARTING KALSHI DAILY DATA COLLECTION")
+        logger.info("STARTING KALSHI PUBLIC API DATA COLLECTION")
         logger.info("=" * 50)
         
         start_time = datetime.now()
         
         try:
-            # Collect events data
+            # Test API connectivity first
+            logger.info("Testing API connectivity...")
+            status_response = self.make_request('/exchange/status')
+            if not status_response:
+                raise Exception("Cannot connect to Kalshi API")
+            
+            logger.info(f"Exchange status: Trading Active = {status_response.get('trading_active', 'Unknown')}")
+            
+            # Collect events data (includes nested market data)
             events = self.collect_events_data()
             events_file = self.save_to_csv(events, 'kalshi_events')
             
-            # Collect markets data
-            markets = self.collect_markets_data(events)
+            # Collect markets data separately for completeness
+            markets = self.collect_markets_data()
             markets_file = self.save_to_csv(markets, 'kalshi_markets')
+            
+            # Collect sample trade data for activity insights
+            trades = self.collect_trade_data_sample()
+            trades_file = self.save_to_csv(trades, 'kalshi_recent_trades') if trades else None
             
             # Summary
             end_time = datetime.now()
             duration = end_time - start_time
             
             logger.info("=" * 50)
-            logger.info("COLLECTION COMPLETE")
+            logger.info("PUBLIC API COLLECTION COMPLETE")
             logger.info(f"Events collected: {len(events) if events else 0}")
             logger.info(f"Markets collected: {len(markets) if markets else 0}")
+            logger.info(f"Recent trades collected: {len(trades) if trades else 0}")
             logger.info(f"Duration: {duration}")
+            logger.info(f"API calls made: ~{3 + len(events)//200 + len(markets)//200}")  # Rough estimate
             logger.info(f"Files saved:")
             if events_file:
                 logger.info(f"  - {events_file}")
             if markets_file:
                 logger.info(f"  - {markets_file}")
+            if trades_file:
+                logger.info(f"  - {trades_file}")
             logger.info("=" * 50)
             
             return {
                 'success': True,
                 'events_count': len(events) if events else 0,
                 'markets_count': len(markets) if markets else 0,
+                'trades_count': len(trades) if trades else 0,
                 'events_file': str(events_file) if events_file else None,
                 'markets_file': str(markets_file) if markets_file else None,
+                'trades_file': str(trades_file) if trades_file else None,
                 'duration': str(duration)
             }
             
@@ -246,11 +280,11 @@ class KalshiCollector:
             return {'success': False, 'error': str(e)}
 
 if __name__ == "__main__":
-    collector = KalshiCollector()
+    collector = KalshiPublicCollector()
     result = collector.run_daily_collection()
     
     if result['success']:
-        logger.info("Daily collection completed successfully")
+        logger.info("Daily public API collection completed successfully")
         sys.exit(0)
     else:
         logger.error(f"Daily collection failed: {result.get('error', 'Unknown error')}")
