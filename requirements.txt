@@ -1,0 +1,5 @@
+dune-client
+requests
+python-dotenv
+pandas
+python-dateutil
