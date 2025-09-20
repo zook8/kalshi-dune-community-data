@@ -1,0 +1,26 @@
+name: Kalshi Public API to Dune Daily Pipeline
+
+on:
+  schedule:
+    - cron: '45 3 * * *'  # 11:45 PM ET daily
+  workflow_dispatch:
+
+jobs:
+  collect-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install dependencies
+      run: |
+        pip install dune-client requests python-dotenv pandas python-dateutil
+    - name: Run Kalshi Public API Collection & Dune Upload
+      env:
+        DUNE_API_KEY: ${{ secrets.DUNE_API_KEY }}
+        # No KALSHI_API_KEY needed!
+      run: |
+        python scripts/run_pipeline.py
+

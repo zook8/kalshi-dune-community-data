@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
+<<<<<<< HEAD
 Dune Uploader - Upload Kalshi data to persistent Dune tables
 Creates tables once, then appends daily data to the same tables
+=======
+Dune Uploader - Upload Kalshi data to Dune Analytics
+Uses Dune API to create community datasets for Kalshi prediction market data
+>>>>>>> origin/main
 """
 
 import os
@@ -11,8 +16,12 @@ from datetime import datetime
 from pathlib import Path
 import logging
 from dotenv import load_dotenv
+<<<<<<< HEAD
 import requests
 import json
+=======
+from dune_client import DuneClient
+>>>>>>> origin/main
 import time
 
 # Setup paths
@@ -39,6 +48,7 @@ class DuneUploader:
         if not self.dune_api_key:
             raise ValueError("DUNE_API_KEY not found in environment variables")
         
+<<<<<<< HEAD
         self.base_url = "https://api.dune.com/api/v1"
         self.headers = {
             'X-DUNE-API-KEY': self.dune_api_key,
@@ -298,10 +308,57 @@ class DuneUploader:
         """Upload today's Kalshi data to persistent Dune tables"""
         logger.info("=" * 50)
         logger.info("STARTING DUNE UPLOAD TO PERSISTENT TABLES")
+=======
+        self.dune_client = DuneClient.from_env()
+        self.data_dir = PROJECT_ROOT / "data"
+        self.date_str = datetime.now().strftime('%Y%m%d')
+    
+    def prepare_data_for_upload(self, csv_file_path):
+        """Prepare CSV data for Dune upload"""
+        try:
+            df = pd.read_csv(csv_file_path)
+            
+            # Convert DataFrame back to CSV string for Dune API
+            csv_string = df.to_csv(index=False)
+            
+            logger.info(f"Prepared {len(df)} rows from {csv_file_path}")
+            return csv_string, len(df)
+            
+        except Exception as e:
+            logger.error(f"Failed to prepare data from {csv_file_path}: {e}")
+            return None, 0
+    
+    def upload_to_dune(self, csv_data, table_name, description):
+        """Upload CSV data to Dune"""
+        try:
+            result = self.dune_client.upload_csv(
+                data=csv_data,
+                table_name=table_name,
+                description=description,
+                is_private=False  # Make data public for community use
+            )
+            
+            if result:
+                logger.info(f"Successfully uploaded to Dune table: {table_name}")
+                return True
+            else:
+                logger.error(f"Failed to upload {table_name}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Dune upload failed for {table_name}: {e}")
+            return False
+    
+    def upload_daily_data(self):
+        """Upload today's Kalshi data to Dune"""
+        logger.info("=" * 50)
+        logger.info("STARTING DUNE UPLOAD")
+>>>>>>> origin/main
         logger.info("=" * 50)
         
         results = {'events': False, 'markets': False}
         
+<<<<<<< HEAD
         # Process events data
         events_file = self.data_dir / f"kalshi_events_{self.date_str}.csv"
         if events_file.exists():
@@ -355,10 +412,41 @@ class DuneUploader:
                 
             except Exception as e:
                 logger.error(f"Error processing markets data: {e}")
+=======
+        # Upload events data
+        events_file = self.data_dir / f"kalshi_events_{self.date_str}.csv"
+        if events_file.exists():
+            logger.info(f"Uploading events data from {events_file}")
+            csv_data, row_count = self.prepare_data_for_upload(events_file)
+            
+            if csv_data:
+                table_name = f"kalshi_events_{self.date_str}"
+                description = f"Kalshi prediction market events data collected on {datetime.now().strftime('%Y-%m-%d')}. Contains {row_count} events with full metadata including status, category, title, and market counts. Data collected via Kalshi API."
+                
+                results['events'] = self.upload_to_dune(csv_data, table_name, description)
+                
+                # Wait between uploads to be respectful
+                time.sleep(2)
+        else:
+            logger.warning(f"Events file not found: {events_file}")
+        
+        # Upload markets data
+        markets_file = self.data_dir / f"kalshi_markets_{self.date_str}.csv"
+        if markets_file.exists():
+            logger.info(f"Uploading markets data from {markets_file}")
+            csv_data, row_count = self.prepare_data_for_upload(markets_file)
+            
+            if csv_data:
+                table_name = f"kalshi_markets_{self.date_str}"
+                description = f"Kalshi prediction market individual markets data collected on {datetime.now().strftime('%Y-%m-%d')}. Contains {row_count} open markets with pricing, volume, liquidity, and trading data. Data collected via Kalshi API."
+                
+                results['markets'] = self.upload_to_dune(csv_data, table_name, description)
+>>>>>>> origin/main
         else:
             logger.warning(f"Markets file not found: {markets_file}")
         
         # Summary
+<<<<<<< HEAD
         namespace = self.get_dune_username()
         logger.info("=" * 50)
         logger.info("UPLOAD TO PERSISTENT TABLES COMPLETE")
@@ -372,6 +460,20 @@ class DuneUploader:
             if results['markets']:
                 logger.info(f"📊 Markets: SELECT * FROM dune.{namespace}.{self.markets_table}")
             logger.info("\nEach run replaces table data - guaranteed no duplicates!")
+=======
+        logger.info("=" * 50)
+        logger.info("UPLOAD COMPLETE")
+        logger.info(f"Events upload: {'SUCCESS' if results['events'] else 'FAILED'}")
+        logger.info(f"Markets upload: {'SUCCESS' if results['markets'] else 'FAILED'}")
+        
+        # Log table access info
+        if results['events'] or results['markets']:
+            logger.info("\nTo query your data in Dune, use:")
+            if results['events']:
+                logger.info(f"SELECT * FROM dune.{self.dune_client.get_username() or 'your_username'}.kalshi_events_{self.date_str}")
+            if results['markets']:
+                logger.info(f"SELECT * FROM dune.{self.dune_client.get_username() or 'your_username'}.kalshi_markets_{self.date_str}")
+>>>>>>> origin/main
         
         logger.info("=" * 50)
         

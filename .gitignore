@@ -45,10 +45,14 @@ venv.bak/
 Thumbs.db
 
 # Logs
-logs/*.log
+*.log
+logs/
 
 # Data files (temporary - consider if you want to track these)
-data/*.csv
+data/
+*.csv
+*.json
+*.parquet
 
 # Claude context (optional - keep local)
 .claude/
