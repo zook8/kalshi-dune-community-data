@@ -33,6 +33,7 @@ jobs:
       - name: Run Kalshi Data Pipeline
         env:
           DUNE_API_KEY: ${{ secrets.DUNE_API_KEY }}
+          APPEND_MODE: "true"  # Enable append mode for historical data preservation
         run: |
           echo "Starting Kalshi data collection and upload pipeline..."
           python scripts/run_pipeline.py

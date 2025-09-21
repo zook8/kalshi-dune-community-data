@@ -206,6 +206,68 @@ class DuneUploader:
             logger.error(f"Dune API request failed for {endpoint}: {e}")
             return False
 
+    def check_if_todays_data_exists(self, table_name):
+        """Check if today's data already exists in table"""
+        try:
+            namespace = self.get_dune_username()
+            today_date = datetime.now().strftime('%Y-%m-%d')
+
+            # Create a simple query to check for today's data
+            query_url = f"https://api.dune.com/api/v1/query/execute"
+
+            # Simple query to count rows with today's collection_date
+            sql_query = f"SELECT COUNT(*) as count FROM dune.{namespace}.{table_name} WHERE collection_date = '{today_date}'"
+
+            payload = {
+                "query_sql": sql_query,
+                "is_private": False
+            }
+
+            headers = {
+                'X-DUNE-API-KEY': self.dune_api_key,
+                'Content-Type': 'application/json'
+            }
+
+            response = requests.post(query_url, headers=headers, json=payload)
+
+            if response.status_code == 200:
+                result = response.json()
+                # If we get results and count > 0, data exists
+                if result.get('result') and len(result['result']['rows']) > 0:
+                    count = result['result']['rows'][0].get('count', 0)
+                    logger.info(f"Found {count} rows for today's date in {table_name}")
+                    return count > 0
+
+            # If query fails or returns no results, assume no data exists
+            logger.info(f"No existing data found for today in {table_name}")
+            return False
+
+        except Exception as e:
+            logger.warning(f"Could not check existing data for {table_name}: {e}")
+            # If check fails, assume no data exists (safe to proceed)
+            return False
+
+    def smart_append_data(self, table_name, df_today):
+        """Smart append: check if today's data exists, then append or skip"""
+        append_mode = os.getenv('APPEND_MODE', 'false').lower() == 'true'
+
+        if not append_mode:
+            # Fall back to original clear-and-replace behavior
+            logger.info(f"APPEND_MODE not enabled, using clear-and-replace for {table_name}")
+            return self.clear_todays_data_via_rebuild(table_name, df_today)
+
+        logger.info(f"APPEND_MODE enabled: checking for existing data in {table_name}")
+
+        # Check if today's data already exists
+        if self.check_if_todays_data_exists(table_name):
+            logger.info(f"Today's data already exists in {table_name} - skipping upload to prevent duplicates")
+            logger.info("💰 Saved Dune credits by skipping duplicate upload!")
+            return True  # Consider this a success
+
+        # Today's data doesn't exist, safe to insert
+        logger.info(f"No existing data for today in {table_name} - proceeding with append")
+        return self.insert_data_to_table_direct(table_name, df_today)
+
     def clear_todays_data_via_rebuild(self, table_name, df_today):
         """Clear table and insert only today's data (rebuild approach)"""
         logger.info(f"Using rebuild approach: clear table and insert fresh data for {table_name}")
@@ -339,8 +401,8 @@ class DuneUploader:
                     # Keep only expected columns in correct order
                     df_events = df_events[expected_events_columns]
 
-                    # Clear table and insert fresh data (prevents duplicates)
-                    results['events'] = self.clear_todays_data_via_rebuild(self.events_table, df_events)
+                    # Smart append: check for existing data and append only if needed
+                    results['events'] = self.smart_append_data(self.events_table, df_events)
 
             except Exception as e:
                 logger.error(f"Error processing events data: {e}")
@@ -391,8 +453,8 @@ class DuneUploader:
                     # Keep only expected columns in correct order
                     df_markets = df_markets[expected_markets_columns]
 
-                    # Clear table and insert fresh data (prevents duplicates)
-                    results['markets'] = self.clear_todays_data_via_rebuild(self.markets_table, df_markets)
+                    # Smart append: check for existing data and append only if needed
+                    results['markets'] = self.smart_append_data(self.markets_table, df_markets)
 
             except Exception as e:
                 logger.error(f"Error processing markets data: {e}")
