@@ -41,9 +41,21 @@ class KalshiCollector:
         })
         self.data_dir = PROJECT_ROOT / "data"
         self.data_dir.mkdir(exist_ok=True)
-        self.date_str = datetime.now().strftime('%Y%m%d')
-        self.collection_datetime = datetime.now(timezone.utc)
-        self.collection_date = self.collection_datetime.date().isoformat()  # YYYY-MM-DD
+        # Use COLLECTION_DATE environment variable if available (from GitHub Actions)
+        # Otherwise fallback to current time for local development
+        collection_date_str = os.getenv('COLLECTION_DATE')
+        if collection_date_str:
+            # Parse the COLLECTION_DATE (YYYY-MM-DD format)
+            collection_date = datetime.strptime(collection_date_str, '%Y-%m-%d').date()
+            # Set collection_datetime to start of day in UTC for the specified date
+            self.collection_datetime = datetime.combine(collection_date, datetime.min.time(), timezone.utc)
+            self.collection_date = collection_date_str
+            self.date_str = collection_date.strftime('%Y%m%d')
+        else:
+            # Fallback to current time for local development
+            self.collection_datetime = datetime.now(timezone.utc)
+            self.collection_date = self.collection_datetime.date().isoformat()  # YYYY-MM-DD
+            self.date_str = datetime.now().strftime('%Y%m%d')
 
     def make_request(self, endpoint, params=None, api_limit=200):
         """Make API request with error handling and gentle rate limiting"""

@@ -30,9 +30,14 @@ jobs:
         run: |
           mkdir -p logs data
 
+      - name: Set collection date
+        id: date
+        run: echo "date=$(date -u +%Y-%m-%d)" >> $GITHUB_OUTPUT
+
       - name: Run Kalshi Data Pipeline
         env:
           DUNE_API_KEY: ${{ secrets.DUNE_API_KEY }}
+          COLLECTION_DATE: ${{ steps.date.outputs.date }}
           APPEND_MODE: "true"  # Enable append mode for historical data preservation
         run: |
           echo "Starting Kalshi data collection and upload pipeline..."

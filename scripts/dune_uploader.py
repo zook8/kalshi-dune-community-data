@@ -48,7 +48,16 @@ class DuneUploader:
         }
 
         self.data_dir = PROJECT_ROOT / "data"
-        self.date_str = datetime.now().strftime('%Y%m%d')
+        # Use COLLECTION_DATE environment variable if available (from GitHub Actions)
+        # Otherwise fallback to current time for local development
+        collection_date_str = os.getenv('COLLECTION_DATE')
+        if collection_date_str:
+            # Parse the COLLECTION_DATE (YYYY-MM-DD format) and convert to YYYYMMDD
+            collection_date = datetime.strptime(collection_date_str, '%Y-%m-%d').date()
+            self.date_str = collection_date.strftime('%Y%m%d')
+        else:
+            # Fallback to current time for local development
+            self.date_str = datetime.now().strftime('%Y%m%d')
 
         # Table names - these will be persistent tables
         self.events_table = "kalshi_events"
@@ -210,7 +219,12 @@ class DuneUploader:
         """Check if today's data already exists in table"""
         try:
             namespace = self.get_dune_username()
-            today_date = datetime.now().strftime('%Y-%m-%d')
+            # Use COLLECTION_DATE environment variable if available, otherwise current date
+            collection_date_str = os.getenv('COLLECTION_DATE')
+            if collection_date_str:
+                today_date = collection_date_str  # Already in YYYY-MM-DD format
+            else:
+                today_date = datetime.now().strftime('%Y-%m-%d')  # Fallback for local dev
 
             # Create a simple query to check for today's data
             query_url = f"https://api.dune.com/api/v1/query/execute"
