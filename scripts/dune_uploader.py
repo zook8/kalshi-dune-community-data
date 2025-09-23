@@ -265,22 +265,18 @@ class DuneUploader:
             return False
 
     def smart_append_data(self, table_name, df_today):
-        """Smart append: check if today's data exists, then append or skip"""
+        """Simplified append: relies on once-daily workflow schedule to prevent duplicates"""
         if not self.append_mode:
             # Fall back to original clear-and-replace behavior
             logger.info(f"APPEND_MODE not enabled, using clear-and-replace for {table_name}")
             return self.clear_todays_data_via_rebuild(table_name, df_today)
 
-        logger.info(f"APPEND_MODE enabled: checking for existing data in {table_name}")
+        logger.info(f"APPEND_MODE enabled: using simplified append strategy for {table_name}")
+        logger.info("📅 Relying on once-daily workflow schedule to prevent duplicates")
 
-        # Check if today's data already exists
-        if self.check_if_todays_data_exists(table_name):
-            logger.info(f"Today's data already exists in {table_name} - skipping upload to prevent duplicates")
-            logger.info("💰 Saved Dune credits by skipping duplicate upload!")
-            return True  # Consider this a success
-
-        # Today's data doesn't exist, safe to insert
-        logger.info(f"No existing data for today in {table_name} - proceeding with append")
+        # Simplified strategy: Just append the data
+        # Assumes workflow runs once daily and doesn't need complex duplicate detection
+        logger.info(f"Appending {len(df_today)} rows to preserve historical data")
         return self.insert_data_to_table_direct(table_name, df_today)
 
     def clear_todays_data_via_rebuild(self, table_name, df_today):
