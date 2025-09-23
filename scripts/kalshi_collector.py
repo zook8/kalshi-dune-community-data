@@ -95,7 +95,7 @@ class KalshiCollector:
             if cursor:
                 params['cursor'] = cursor
 
-            data = self.make_request('events', params)
+            data = self.make_request('events', params, api_limit=200)
             if not data:
                 logger.error("Failed to fetch events")
                 break
@@ -139,7 +139,7 @@ class KalshiCollector:
             if cursor:
                 params['cursor'] = cursor
 
-            data = self.make_request('markets', params)
+            data = self.make_request('markets', params, api_limit=1000)
             if not data:
                 logger.error("Failed to fetch markets")
                 break
