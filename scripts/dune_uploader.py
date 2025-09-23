@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Dune Uploader - Upload Kalshi data to persistent Dune tables
-Creates tables once, then uses clear-and-replace strategy for duplicate prevention
+Creates tables once, then uses smart append strategy for duplicate prevention
 """
 
 import os
@@ -62,6 +62,9 @@ class DuneUploader:
         # Table names - these will be persistent tables
         self.events_table = "kalshi_events"
         self.markets_table = "kalshi_markets"
+        
+        # Enable append mode by default
+        self.append_mode = os.getenv('APPEND_MODE', 'true').lower() == 'true'
 
     def make_dune_request(self, endpoint, method='POST', data=None):
         """Make request to Dune API with error handling"""
@@ -263,9 +266,7 @@ class DuneUploader:
 
     def smart_append_data(self, table_name, df_today):
         """Smart append: check if today's data exists, then append or skip"""
-        append_mode = os.getenv('APPEND_MODE', 'false').lower() == 'true'
-
-        if not append_mode:
+        if not self.append_mode:
             # Fall back to original clear-and-replace behavior
             logger.info(f"APPEND_MODE not enabled, using clear-and-replace for {table_name}")
             return self.clear_todays_data_via_rebuild(table_name, df_today)
@@ -298,87 +299,88 @@ class DuneUploader:
     def define_events_schema(self):
         """Define schema for events table"""
         return [
-            {"name": "category_acronym", "type": "varchar"},
-            {"name": "collection_date", "type": "varchar"},
-            {"name": "collection_datetime", "type": "varchar"},
-            {"name": "date", "type": "varchar"},
             {"name": "event_ticker", "type": "varchar"},
-            {"name": "markets_count", "type": "integer"},
-            {"name": "mutually_exclusive", "type": "boolean"},
             {"name": "series_ticker", "type": "varchar"},
-            {"name": "status", "type": "varchar"},
+            {"name": "sub_title", "type": "varchar"},
+            {"name": "title", "type": "varchar"},
+            {"name": "collateral_return_type", "type": "varchar"},
+            {"name": "mutually_exclusive", "type": "boolean"},
+            {"name": "category", "type": "varchar"},
+            {"name": "price_level_structure", "type": "varchar"},
+            {"name": "available_on_brokers", "type": "boolean"},
+            {"name": "collection_date", "type": "varchar"},
+            {"name": "date", "type": "varchar"},
             {"name": "strike_date", "type": "varchar"},
-            {"name": "subtitle", "type": "varchar"},
-            {"name": "title", "type": "varchar"}
+            {"name": "strike_period", "type": "varchar"}
         ]
 
     def define_markets_schema(self):
-        """Define comprehensive schema for markets table with all 57 columns"""
+        """Define comprehensive schema for markets table with all columns"""
         return [
-            {"name": "can_close_early", "type": "boolean"},
-            {"name": "cap_strike", "type": "double"},
-            {"name": "category_acronym", "type": "varchar"},
-            {"name": "close_date", "type": "varchar"},
-            {"name": "close_time", "type": "varchar"},
-            {"name": "collection_date", "type": "varchar"},
-            {"name": "collection_datetime", "type": "varchar"},
-            {"name": "custom_strike", "type": "varchar"},
-            {"name": "date", "type": "varchar"},
-            {"name": "event_ticker", "type": "varchar"},
-            {"name": "expected_result", "type": "varchar"},
-            {"name": "expiration_time", "type": "varchar"},
-            {"name": "expiration_value", "type": "varchar"},
-            {"name": "floor_strike", "type": "double"},
-            {"name": "functional_strike", "type": "double"},
-            {"name": "last_price", "type": "double"},
-            {"name": "liquidity", "type": "double"},
-            {"name": "max_close_early_time", "type": "varchar"},
-            {"name": "no_ask", "type": "double"},
-            {"name": "no_bid", "type": "double"},
-            {"name": "open_interest", "type": "integer"},
-            {"name": "open_time", "type": "varchar"},
-            {"name": "previous_no", "type": "double"},
-            {"name": "previous_price", "type": "double"},
-            {"name": "previous_yes", "type": "double"},
-            {"name": "result", "type": "varchar"},
-            {"name": "risk_limit_cents", "type": "integer"},
-            {"name": "series_ticker", "type": "varchar"},
-            {"name": "status", "type": "varchar"},
-            {"name": "strike_type", "type": "varchar"},
-            {"name": "subtitle", "type": "varchar"},
             {"name": "ticker", "type": "varchar"},
+            {"name": "event_ticker", "type": "varchar"},
+            {"name": "market_type", "type": "varchar"},
             {"name": "title", "type": "varchar"},
+            {"name": "subtitle", "type": "varchar"},
+            {"name": "yes_sub_title", "type": "varchar"},
+            {"name": "no_sub_title", "type": "varchar"},
+            {"name": "open_time", "type": "varchar"},
+            {"name": "close_time", "type": "varchar"},
+            {"name": "expected_expiration_time", "type": "varchar"},
+            {"name": "expiration_time", "type": "varchar"},
+            {"name": "latest_expiration_time", "type": "varchar"},
+            {"name": "settlement_timer_seconds", "type": "integer"},
+            {"name": "status", "type": "varchar"},
+            {"name": "response_price_units", "type": "varchar"},
+            {"name": "notional_value", "type": "double"},
+            {"name": "notional_value_dollars", "type": "double"},
+            {"name": "yes_bid", "type": "double"},
+            {"name": "yes_bid_dollars", "type": "double"},
+            {"name": "yes_ask", "type": "double"},
+            {"name": "yes_ask_dollars", "type": "double"},
+            {"name": "no_bid", "type": "double"},
+            {"name": "no_bid_dollars", "type": "double"},
+            {"name": "no_ask", "type": "double"},
+            {"name": "no_ask_dollars", "type": "double"},
+            {"name": "last_price", "type": "double"},
+            {"name": "last_price_dollars", "type": "double"},
+            {"name": "previous_yes_bid", "type": "double"},
+            {"name": "previous_yes_bid_dollars", "type": "double"},
+            {"name": "previous_yes_ask", "type": "double"},
+            {"name": "previous_yes_ask_dollars", "type": "double"},
+            {"name": "previous_price", "type": "double"},
+            {"name": "previous_price_dollars", "type": "double"},
             {"name": "volume", "type": "integer"},
             {"name": "volume_24h", "type": "integer"},
-            {"name": "yes_ask", "type": "double"},
-            {"name": "yes_bid", "type": "double"},
+            {"name": "liquidity", "type": "double"},
+            {"name": "liquidity_dollars", "type": "double"},
+            {"name": "open_interest", "type": "integer"},
+            {"name": "result", "type": "varchar"},
+            {"name": "can_close_early", "type": "boolean"},
+            {"name": "expiration_value", "type": "varchar"},
             {"name": "category", "type": "varchar"},
-            {"name": "event_id", "type": "varchar"},
-            {"name": "market_id", "type": "varchar"},
-            {"name": "market_url", "type": "varchar"},
-            {"name": "rules", "type": "varchar"},
-            {"name": "tags", "type": "varchar"},
-            {"name": "trading_active", "type": "boolean"},
-            {"name": "trading_end_time", "type": "varchar"},
-            {"name": "trading_start_time", "type": "varchar"},
-            {"name": "response_price_per_dollar", "type": "double"},
-            {"name": "dollar_volume_24h", "type": "double"},
-            {"name": "notional_volume", "type": "double"},
-            {"name": "number_of_traders", "type": "integer"},
-            {"name": "number_of_unique_bettors", "type": "integer"},
-            {"name": "implied_probability", "type": "double"},
-            {"name": "settlement_timer_seconds", "type": "integer"},
-            {"name": "settlement_value", "type": "varchar"},
-            {"name": "volume_today", "type": "integer"},
-            {"name": "dollar_volume_today", "type": "double"},
-            {"name": "dollar_volume", "type": "double"}
+            {"name": "risk_limit_cents", "type": "integer"},
+            {"name": "strike_type", "type": "varchar"},
+            {"name": "custom_strike", "type": "varchar"},
+            {"name": "rules_primary", "type": "varchar"},
+            {"name": "rules_secondary", "type": "varchar"},
+            {"name": "tick_size", "type": "double"},
+            {"name": "mve_collection_ticker", "type": "varchar"},
+            {"name": "mve_selected_legs", "type": "varchar"},
+            {"name": "collection_date", "type": "varchar"},
+            {"name": "date", "type": "varchar"},
+            {"name": "floor_strike", "type": "double"},
+            {"name": "early_close_condition", "type": "varchar"},
+            {"name": "cap_strike", "type": "double"},
+            {"name": "primary_participant_key", "type": "varchar"},
+            {"name": "fee_waiver_expiration_time", "type": "varchar"}
         ]
 
     def upload_daily_data(self):
-        """Main upload function with duplicate prevention"""
+        """Main upload function with smart append strategy"""
         logger.info("=" * 60)
-        logger.info("STARTING DUNE UPLOAD WITH DUPLICATE PREVENTION")
-        logger.info("Strategy: Clear-and-replace for guaranteed no duplicates")
+        logger.info("STARTING DUNE UPLOAD WITH SMART APPEND")
+        logger.info(f"Strategy: {'Smart append' if self.append_mode else 'Clear-and-replace'}")
         logger.info("=" * 60)
 
         results = {'events': False, 'markets': False}
@@ -413,7 +415,8 @@ class DuneUploader:
                     ]
 
                     # Keep only expected columns in correct order
-                    df_events = df_events[expected_events_columns]
+                    available_columns = [col for col in expected_events_columns if col in df_events.columns]
+                    df_events = df_events[available_columns]
 
                     # Smart append: check for existing data and append only if needed
                     results['events'] = self.smart_append_data(self.events_table, df_events)
@@ -465,7 +468,8 @@ class DuneUploader:
                     ]
 
                     # Keep only expected columns in correct order
-                    df_markets = df_markets[expected_markets_columns]
+                    available_columns = [col for col in expected_markets_columns if col in df_markets.columns]
+                    df_markets = df_markets[available_columns]
 
                     # Smart append: check for existing data and append only if needed
                     results['markets'] = self.smart_append_data(self.markets_table, df_markets)
@@ -488,7 +492,7 @@ class DuneUploader:
                 logger.info(f"📊 Events: SELECT * FROM dune.{namespace}.{self.events_table}")
             if results['markets']:
                 logger.info(f"📊 Markets: SELECT * FROM dune.{namespace}.{self.markets_table}")
-            logger.info("\nEach run replaces table data - guaranteed no duplicates!")
+            logger.info(f"\nStrategy: {'Smart append (preserves historical data)' if self.append_mode else 'Clear and replace (single date only)'}")
 
         logger.info("=" * 50)
 
