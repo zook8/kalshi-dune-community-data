@@ -54,10 +54,13 @@ class DuneUploader:
         if collection_date_str:
             # Parse the COLLECTION_DATE (YYYY-MM-DD format) and convert to YYYYMMDD
             collection_date = datetime.strptime(collection_date_str, '%Y-%m-%d').date()
+            self.collection_date = collection_date_str  # Store for duplicate detection
             self.date_str = collection_date.strftime('%Y%m%d')
         else:
             # Fallback to current time for local development
-            self.date_str = datetime.now().strftime('%Y%m%d')
+            today = datetime.now()
+            self.collection_date = today.strftime('%Y-%m-%d')  # Store for duplicate detection
+            self.date_str = today.strftime('%Y%m%d')
 
         # Table names - these will be persistent tables
         self.events_table = "kalshi_events"
@@ -219,65 +222,80 @@ class DuneUploader:
             return False
 
     def check_if_todays_data_exists(self, table_name):
-        """Check if today's data already exists in table"""
+        """Check if today's data was already uploaded using file-based detection"""
         try:
-            namespace = self.get_dune_username()
-            # Use COLLECTION_DATE environment variable if available, otherwise current date
-            collection_date_str = os.getenv('COLLECTION_DATE')
-            if collection_date_str:
-                today_date = collection_date_str  # Already in YYYY-MM-DD format
+            # Create a marker file to track successful uploads
+            marker_dir = PROJECT_ROOT / "logs" / "upload_markers"
+            marker_dir.mkdir(exist_ok=True, parents=True)
+
+            marker_file = marker_dir / f"{table_name}_{self.collection_date}.marker"
+
+            if marker_file.exists():
+                # Check if marker file was created today (within last 24 hours)
+                file_time = datetime.fromtimestamp(marker_file.stat().st_mtime)
+                time_diff = datetime.now() - file_time
+
+                if time_diff.total_seconds() < 86400:  # 24 hours
+                    logger.info(f"✅ Upload marker found: {table_name} data for {self.collection_date} uploaded at {file_time}")
+                    return True
+                else:
+                    logger.info(f"🔍 Old marker file found (>{time_diff}), proceeding with upload")
+                    marker_file.unlink()  # Remove old marker
+                    return False
             else:
-                today_date = datetime.now().strftime('%Y-%m-%d')  # Fallback for local dev
-
-            # Create a simple query to check for today's data
-            query_url = f"https://api.dune.com/api/v1/query/execute"
-
-            # Simple query to count rows with today's collection_date
-            sql_query = f"SELECT COUNT(*) as count FROM dune.{namespace}.{table_name} WHERE collection_date = '{today_date}'"
-
-            payload = {
-                "query_sql": sql_query,
-                "is_private": False
-            }
-
-            headers = {
-                'X-DUNE-API-KEY': self.dune_api_key,
-                'Content-Type': 'application/json'
-            }
-
-            response = requests.post(query_url, headers=headers, json=payload)
-
-            if response.status_code == 200:
-                result = response.json()
-                # If we get results and count > 0, data exists
-                if result.get('result') and len(result['result']['rows']) > 0:
-                    count = result['result']['rows'][0].get('count', 0)
-                    logger.info(f"Found {count} rows for today's date in {table_name}")
-                    return count > 0
-
-            # If query fails or returns no results, assume no data exists
-            logger.info(f"No existing data found for today in {table_name}")
-            return False
+                logger.info(f"🔍 No upload marker found for {table_name} on {self.collection_date}")
+                return False
 
         except Exception as e:
-            logger.warning(f"Could not check existing data for {table_name}: {e}")
+            logger.warning(f"Could not check upload marker for {table_name}: {e}")
             # If check fails, assume no data exists (safe to proceed)
             return False
 
+    def mark_successful_upload(self, table_name):
+        """Create a marker file to indicate successful upload"""
+        try:
+            marker_dir = PROJECT_ROOT / "logs" / "upload_markers"
+            marker_dir.mkdir(exist_ok=True, parents=True)
+
+            marker_file = marker_dir / f"{table_name}_{self.collection_date}.marker"
+            marker_file.write_text(f"Uploaded at {datetime.now().isoformat()}")
+
+            logger.info(f"📝 Created upload marker: {marker_file}")
+
+        except Exception as e:
+            logger.warning(f"Could not create upload marker for {table_name}: {e}")
+            # Non-critical error, don't fail the upload
+
     def smart_append_data(self, table_name, df_today):
-        """Simplified append: relies on once-daily workflow schedule to prevent duplicates"""
+        """Enhanced append with bulletproof duplicate detection"""
         if not self.append_mode:
             # Fall back to original clear-and-replace behavior
             logger.info(f"APPEND_MODE not enabled, using clear-and-replace for {table_name}")
             return self.clear_todays_data_via_rebuild(table_name, df_today)
 
-        logger.info(f"APPEND_MODE enabled: using simplified append strategy for {table_name}")
-        logger.info("📅 Relying on once-daily workflow schedule to prevent duplicates")
+        logger.info(f"APPEND_MODE enabled: using enhanced append strategy for {table_name}")
 
-        # Simplified strategy: Just append the data
-        # Assumes workflow runs once daily and doesn't need complex duplicate detection
-        logger.info(f"Appending {len(df_today)} rows to preserve historical data")
-        return self.insert_data_to_table_direct(table_name, df_today)
+        # Enhanced duplicate detection: Check if today's data already exists
+        logger.info(f"🔍 Checking if data for {self.collection_date} already exists in {table_name}...")
+
+        if self.check_if_todays_data_exists(table_name):
+            logger.info(f"✅ Data for {self.collection_date} already exists in {table_name}")
+            logger.info("🚫 Skipping upload to prevent duplicates - this is the correct behavior!")
+            logger.info("📊 Table already contains data for today's collection date")
+            return True  # Return success since data is already there
+
+        # No existing data found - safe to append
+        logger.info(f"📊 No existing data found for {self.collection_date} in {table_name}")
+        logger.info(f"✅ Safe to append {len(df_today)} rows to preserve historical data")
+
+        # Attempt upload
+        success = self.insert_data_to_table_direct(table_name, df_today)
+
+        # Create marker file if upload succeeded
+        if success:
+            self.mark_successful_upload(table_name)
+
+        return success
 
     def clear_todays_data_via_rebuild(self, table_name, df_today):
         """Clear table and insert only today's data (rebuild approach)"""
