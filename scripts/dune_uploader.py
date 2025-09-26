@@ -92,7 +92,14 @@ class DuneUploader:
                 return {"already_existed": True}
 
             if response.status_code >= 400:
-                logger.error(f"Response: {response.text}")
+                logger.error(f"DUNE API ERROR {response.status_code}: {response.text}")
+                logger.error(f"Request URL: {url}")
+                logger.error(f"Request method: {method}")
+                if data:
+                    logger.error(f"Payload size: {len(str(data))} characters")
+                    if 'data' in data:
+                        logger.error(f"Data rows: {len(data.get('data', []))}")
+                logger.error(f"Headers: {headers}")
 
             response.raise_for_status()
             return response.json() if response.text else {}
@@ -461,6 +468,12 @@ class DuneUploader:
                     # Map CSV columns to match Dune table schema exactly
                     df_markets = df_markets.rename(columns={'DATE': 'date'})
 
+                    # SCHEMA COMPATIBILITY FIX: Handle Kalshi API changes
+                    # Add missing columns that may have been removed from API
+                    if 'primary_participant_key' not in df_markets.columns:
+                        logger.info("Adding missing primary_participant_key column (Kalshi API change compatibility)")
+                        df_markets['primary_participant_key'] = ''
+
                     # Reorder columns to match Dune table schema
                     expected_markets_columns = [
                         'ticker', 'event_ticker', 'market_type', 'title', 'subtitle',
@@ -481,9 +494,8 @@ class DuneUploader:
                         'fee_waiver_expiration_time'
                     ]
 
-                    # Keep only expected columns in correct order
-                    available_columns = [col for col in expected_markets_columns if col in df_markets.columns]
-                    df_markets = df_markets[available_columns]
+                    # Reorder all columns to match schema, filling missing ones with empty values
+                    df_markets = df_markets.reindex(columns=expected_markets_columns, fill_value='')
 
                     # Smart append: check for existing data and append only if needed
                     results['markets'] = self.smart_append_data(self.markets_table, df_markets)
