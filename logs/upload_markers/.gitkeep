@@ -1,0 +1,3 @@
+# This file ensures the upload_markers directory is preserved in Git
+# Marker files are created here to track successful uploads and prevent duplicates
+# Files format: {table_name}_{YYYY-MM-DD}.marker
