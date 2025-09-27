@@ -1,0 +1,2 @@
+# This file ensures the data directory is preserved in Git
+# Temporary CSV files are created here during pipeline execution
